@@ -14,7 +14,7 @@ export LANG=de_DE.UTF-8
 source $HOME/.config/umsatz-giro.cfg
 
 # internal vars
-BASENAME=$(basename $0)
+BASENAME=$(basename "$0")
 OUTDIR="outdir"
 WORKDIR="workdir"
 PDF_HEADER=""  # init (customized pdf internal page header)
@@ -59,7 +59,7 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
    $GIRODIR/$WORKDIR/
 
  usage:
-   $(basename $0) -y YYYY -t TYPE [-k KONTO] [-p "pdf header text"] [-s positiv|negativ|all] [-h]
+   $BASENAME -y YYYY -t TYPE [-k KONTO] [-p "pdf header text"] [-s positiv|negativ|all] [-h]
 
     -h help                ->  this help
 
@@ -95,11 +95,11 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
    -s positiv|negativ|all  ->  (+- sign) accumulate EUR values either '+' or '-'
 
  examples:
-   $(basename $0) -y 2023 -t moosach   # (pdf header internally overwritten)
-   $(basename $0) -y 2022 -t steuer -s positiv
-   $(basename $0) -y 2021 -t "search:landeskrankenhilfe" -s negativ -p "LKH Krankenkasse in 2021"
-   $(basename $0) -y 2020 -t total -s positiv -p "alle Einnahmen in 2020"
-   $(basename $0) -y 2020 -t versicherungen -s negativ -p "Ausgaben fuer Versicherungen in 2020" 
+   $BASENAME -y 2023 -t moosach   # (pdf header internally overwritten)
+   $BASENAME -y 2022 -t steuer -s positiv
+   $BASENAME -y 2021 -t "search:landeskrankenhilfe" -s negativ -p "LKH Krankenkasse in 2021"
+   $BASENAME -y 2020 -t total -s positiv -p "alle Einnahmen in 2020"
+   $BASENAME -y 2020 -t versicherungen -s negativ -p "Ausgaben fuer Versicherungen in 2020" 
 
  you may enter values or load the relevant $GIRODIR/$OUTDIR/???.csv file(s) into:
    $G_UND_V (if exists)
