@@ -241,8 +241,8 @@ function GENERATE_BASE_CSV () {
  local SIGN="$SIGN"   #       "
  local FSEP="$FSEP"   #       "
 
- [[ "$TYPE" == "eingang" || "$SIGN" == "positiv" ]]
- [[ "$TYPE" == "ausgang" || "$SIGN" == "negativ" ]]
+ [[ "$TYPE" == "eingang" ]] && SIGN="positiv"
+ [[ "$TYPE" == "ausgang" ]] && SIGN="negativ"
 
  awk -v FSEP="$FSEP" -v YEAR="$YEAR" -v SIGN="$SIGN" '
 BEGIN { FS  = FSEP
