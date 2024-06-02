@@ -1,7 +1,8 @@
 #!/bin/bash
 # umsatz-giro.sh - analyze giro account data
 # Manfred Schneider (2024)
-# %GIT-CONTROL% [~/Development/github.com/banking_analyzer]
+# %GIT-CONTROL%
+#   this file is git-managed in ~/Development/github.com/banking_analyzer/bin/
 #----------------------------------------------------------------------------------------------------
 
 
@@ -11,7 +12,8 @@
 export LANG=de_DE.UTF-8
 
 # specific vars
-source $HOME/.config/umsatz-giro.cfg
+CONFIG="$HOME/.config/umsatz-giro.cfg"
+source $CONFIG
 
 # internal vars
 BASENAME=$(basename "$0")
@@ -19,6 +21,7 @@ OUTDIR="outdir"
 WORKDIR="workdir"
 PDF_HEADER=""  # init (customized pdf internal page header)
 PREFIX=""      # init (customized output filename prefix)
+AWK="/usr/bin/awk"
 #----------------------------------------------------------------------------------------------------
 
 
@@ -26,7 +29,7 @@ PREFIX=""      # init (customized output filename prefix)
 function Display_Usage () {
  cat<<_EOH
 
- (prepare for terrible germish language mix ...)
+ (sorry for terrible germish language mix ...)
 
  displays several umsaetze for moosach, unterfoehring, rente (=pension), etc..
 
@@ -34,7 +37,7 @@ function Display_Usage () {
  you urgently need validate every record for correctness. 
 
  tool $BASENAME resides best in \$HOME/bin/
- configured by \$HOME/.config/${BASENAME%.sh}.cnf
+ configured by $CONFIG
 
 
  first download csv file(s) from SSKM to supply required csv files:
@@ -42,7 +45,7 @@ function Display_Usage () {
    mandatory file name  => $GIRODIR/giro-99999999-yyyymmdd-YYYYMMDD.camtv2.csv
                                                   ^^^^^^^^ ^^^^^^^^
                                                    -from-    -to-
-     eg. $GIRODIR/giro-99999999-20230101-20231231.camtv2.csv
+     eg. $GIRODIR/giro-${DEF_KONTO}-20230101-20231231.camtv2.csv
 
 
  required tools:
@@ -50,7 +53,7 @@ function Display_Usage () {
    - /usr/bin/enscript
 
  current input CSV files:
-$(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
+$(eval ls -1 "$GIRODIR/$CSV_DEF" | $AWK '{printf("    %s\n", $0)}')
 
  program displays result formatted on screen and creates also output files:
    $GIRODIR/$OUTDIR/*.{csv,table,pdf}
@@ -65,7 +68,7 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
 
     -y YEAR                ->  eg. 2023
 
-    -t TYPE            [*] ->  option can be shortened but must be unique
+    -t TYPE            [*] ->  some usefull presets (option can be shortened but must be unique)
        moos[*]             ->  Immobile moosach/oberwiesenfeld (Ein- und Ausgang)
        unterf[*]           ->  Immobile unterfoehring (Ein- und Ausgang)
        miete[*]            ->  Immobilen (alle) -> Mieteingang gesamt
@@ -82,11 +85,11 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
        eingang             ->  alle '+' Buchungen
        ausgang             ->  alle '-' Buchungen
        total               ->  alle Buchungen - nur sinnvoll mit p3 = positiv|negativ
-       large               ->  sorted by large euro numbers (>= $LIMIT €)
+       large               ->  sorted by (positive) large euro numbers (>= +$LIMIT €)
        complete            ->  walk through most types in one command
        "search:what.*ever" ->  search for any string (case insensitiv, simple regex allowed)
 
-   -k KONTO                ->  giro konto number (default internally configured)
+   -k KONTO                ->  giro konto number (default -> $CONFIG)
 
    -p "pdf header text"    ->  any header text for pdf file, max. 80 chars (may be overwritten internally)
 
@@ -95,11 +98,12 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | awk '{printf("    %s\n", $0)}')
    -s positiv|negativ|all  ->  (+- sign) accumulate EUR values either '+' or '-'
 
  examples:
-   $BASENAME -y 2023 -t moosach   # (pdf header internally overwritten)
-   $BASENAME -y 2022 -t steuer -s positiv
-   $BASENAME -y 2021 -t "search:landeskrankenhilfe" -s negativ -p "LKH Krankenkasse in 2021"
-   $BASENAME -y 2020 -t total -s positiv -p "alle Einnahmen in 2020"
-   $BASENAME -y 2020 -t versicherungen -s negativ -p "Ausgaben fuer Versicherungen in 2020" 
+   $BASENAME -y 2024 -t eingang                                                               # all postive income in 2024
+   $BASENAME -y 2024 -t total -s positiv -p "alle Einnahmen in 2024"                          # same as before + nice pdf header
+   $BASENAME -y 2023 -t moosach                                                               # income rent of moosach
+   $BASENAME -y 2022 -t steuer -s positiv                                                     # tax refund (hahaha)
+   $BASENAME -y 2021 -t "search:landeskrankenhilfe" -s negativ -p "LKH Krankenkasse in 2021"  # PKK payments
+   $BASENAME -y 2020 -t versicherungen -s negativ -p "Ausgaben fuer Versicherungen in 2020"   # all insurance payments
 
  you may enter values or load the relevant $GIRODIR/$OUTDIR/???.csv file(s) into:
    $G_UND_V (if exists)
@@ -146,6 +150,12 @@ do
    esac
 done
 
+if [[ "$@" == "" ]]
+then
+   echo "hint: $BASENAME -y 2024 -t steuer  # (-h for detailed help)"
+   exit 0
+fi
+
 # defaults
 KONTO=${KONTO:=$DEF_KONTO}                                 # reset var to default
 CSVPATT="giro-${KONTO}-????????-????????.camtv2.csv"       # format = CAMT-V2
@@ -189,7 +199,7 @@ ENSCRIPT=$(type -p enscript) || { echo "error: required tool 'enscript' not avai
 
 #----------------------------------------------------------------------------------------------------
 # requirements
-eval ls -1 "$GIRODIR/$CSVPATT" &>/dev/null || { echo "error: missing files '$GIRODIR/$CSVPATT'"; exit 1; }
+eval ls -1 "$GIRODIR/$CSVPATT" &>/dev/null || { echo "error: missing files '$GIRODIR/$CSVPATT' (check $CONFIG)"; exit 1; }
 
 umask 0077
 cd "$GIRODIR"  # required !
@@ -244,7 +254,7 @@ function GENERATE_BASE_CSV () {
  [[ "$TYPE" == "eingang" ]] && SIGN="positiv"
  [[ "$TYPE" == "ausgang" ]] && SIGN="negativ"
 
- awk -v FSEP="$FSEP" -v YEAR="$YEAR" -v SIGN="$SIGN" '
+ $AWK -v FSEP="$FSEP" -v YEAR="$YEAR" -v SIGN="$SIGN" '
 BEGIN { FS  = FSEP
         YY  = substr(YEAR, length(YEAR)-1)
         VAL = SIGN                          # positiv | negativ | all ? 
@@ -316,17 +326,17 @@ function DISPLAY_CSV () {
  [[ "$PATTERN" == "Umsatz_Eingang" ]] && PATTERN=".*"
  [[ "$PATTERN" == "Umsatz_Ausgang" ]] && PATTERN=".*"
 
- awk -v SEARCH="$PATTERN" '
+ $AWK -v SEARCH="$PATTERN" '
 BEGIN { FS  = ";"
         SUM = 0
-        PAT = SEARCH
+        PAT = tolower(SEARCH)
         CNT = 0
-        IGNORECASE = 1
+        #%% not in MAWK ! IGNORECASE = 1
         printf("%s%s%s%s%s%s%s%s%s\n", "Datum", FS, "Buchungstext", FS, "Verwendungszweck", FS, "Korrespondent", FS, "Betrag")
       }
 
 {
-   if ($0 ~ PAT) {
+   if (tolower($0) ~ PAT) {
       SUM += $6
       REC = $1 FS $2 FS $3 FS $4 FS $5 FS $6
       # gsub(/[^\x20-\x7e,\xa0-\xff]/, "_", REC)          # replace non printable and non utf-8 chars !!! not required anymore because csv converted to UTF-8
@@ -357,17 +367,17 @@ function DISPLAY_TABLE () {
  [[ "$PATTERN" == "Umsatz_Eingang" ]] && PATTERN=".*"
  [[ "$PATTERN" == "Umsatz_Ausgang" ]] && PATTERN=".*"
 
- awk -v SEARCH="$PATTERN" '
+ $AWK -v SEARCH="$PATTERN" '
 BEGIN { FS  = ";"
         SUM = 0
-        PAT = SEARCH
+        PAT = tolower(SEARCH)
         CNT = 0
-        IGNORECASE = 1
+        #%% not in MAWK ! IGNORECASE = 1
         printf("%-8s | %-25s | %-90s | %-65s | %10s\n\n", "Datum", "Buchungstext", "Verwendungszweck", "Korrespondent", "Betrag")
       }
 
 {
-   if ($0 ~ PAT) {
+   if (tolower($0) ~ PAT) {
       SUM += $6
       REC = $1 FS $2 FS $3 FS $4 FS $5 FS $6
       # gsub(/[^\x20-\x7e]/, "_", REC)                   # replace non printable and non utf-8 chars !!! not required anymore because csv converted to UTF-8
@@ -406,7 +416,7 @@ function DISPLAY_UMSATZ () {
 
  printf ""             > "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"
  DISPLAY_CSV "$REGEX" >> "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" && { mv "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" "$GIRODIR/$OUTDIR/$TITLE.csv"; } \
-                                                           || { echo "info: no '$SIGN' records found in function DISPLAY_UMSATZ for title '$TITLE' (probably no csv data available?)"; rm -f "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"; } 
+                                                           || { echo "info: no '$SIGN' records found in function $FUNCNAME for title '$TITLE' (probably no csv data available?)"; rm -f "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"; } 
 
  printf "$TITLE.table\n\n" > "$GIRODIR/$OUTDIR/$TITLE.table.tmp"
  DISPLAY_TABLE "$REGEX"   >> "$GIRODIR/$OUTDIR/$TITLE.table.tmp" && { mv "$GIRODIR/$OUTDIR/$TITLE.table.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n\n"; cat "$GIRODIR/$OUTDIR/$TITLE.table"; } \
@@ -418,7 +428,7 @@ function DISPLAY_UMSATZ () {
 #----------------------------------------------------------------------------------------------------
 function SORT_BY_EURO () {
  local TITLE="$1"          # also part of output file name
- local LIMIT=$2
+ local LIMIT=$2            # minimal displayed values
  local HEADER="$3"         # optional
  local SIGN="$SIGN"        # reflect positiv or negativ in filename
  local YEAR="$YEAR"        # global definiton
@@ -434,10 +444,10 @@ function SORT_BY_EURO () {
  # sorted by EUR val field #6
  tr -d '"' < "$GIRODIR/$WORKDIR/$CSV_COMPLETE" \
            | sort -t ";" -k 6 -n \
-           | awk -F ";" -v LIM="$LIMIT" '(sqrt(int($6)**2) >= LIM) {gsub(/[^\x20-\x7e]/, "_", $0); printf "%-9s | %-25s | %-90s | %-65s | %10.2f\n", $1, substr($2,0,25), substr($3,0,90), substr($4,0,65), $6}' \
+           | $AWK -F ";" -v LIM="$LIMIT" '(int($6) >= int(LIM)) {gsub(/[^\x20-\x7e]/, "_", $0); printf "%-9s | %-25s | %-90s | %-65s | %10.2f\n", $1, substr($2,0,25), substr($3,0,90), substr($4,0,65), $6}' \
            | tee "$GIRODIR/$OUTDIR/$TITLE.tmp" \
                  && { mv "$GIRODIR/$OUTDIR/$TITLE.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n(no totals for this option)\n" >> "$GIRODIR/$OUTDIR/$TITLE.table"; cat "$GIRODIR/$OUTDIR/$TITLE.table"; } \
-                                               || { echo "info: no records found in function SORT_BY_EURO, type '$TYPE'"; rm -f "$GIRODIR/$OUTDIR/$TITLE.tmp"; } 
+                 || { echo "info: no records found in function $FUNCNAME, type '$TYPE'"; rm -f "$GIRODIR/$OUTDIR/$TITLE.tmp"; } 
 
  [ -e "$GIRODIR/$OUTDIR/$TITLE.table" ] && TABLE_TO_PDF "$GIRODIR/$OUTDIR/$TITLE.table" "$HEADER"
 
@@ -452,7 +462,7 @@ function DISPLAY_FILES () {
  FILE="${FILE}*-${YEAR}_${SIGN}"
 
  printf "\ncreated files:\n"
- find "$GIRODIR/$OUTDIR/" -iname "$FILE.*" -ls | grep . || echo "info: no files created -> $GIRODIR/$OUTDIR/$FILE.*"
+ find "$GIRODIR/$OUTDIR/" -iname "$FILE.*" -ls | grep . || echo "info: no files created in function $FUNCNAME -> $GIRODIR/$OUTDIR/$FILE.*"
  return $?
 }
 #----------------------------------------------------------------------------------------------------
@@ -479,7 +489,7 @@ function TABLE_TO_PDF () {
  # convert between different character encodings
  if [ -e "$TXTFILE" ]
  then $ICONV --from-code="$ENCODING" --to-code="ISO88591//TRANSLIT" --output="$TXTFILE.tmp" "$TXTFILE"
- else echo "error: $ICONV could not find file '$TXTFILE'"
+ else echo "error: $ICONV could not find file '$TXTFILE' in function $FUNCNAME"
  fi
 
  # produce PDF from table file
@@ -497,20 +507,27 @@ function TABLE_TO_PDF () {
 #----------------------------------------------------------------------------------------------------
 
 # first convert csv files to usable mime type
-MIME_CONVERT || { echo "error detected in function MIME_CONVERT, please check outfiles in $OUTDIR/ and $WORKDIR/"; exit 1; }
+MIME_CONVERT || { echo "error detected calling function MIME_CONVERT, please check outfiles in $OUTDIR/ and $WORKDIR/"; exit 1; }
 
 # create once the basic csv (no terminal output)
-GENERATE_BASE_CSV || { echo "error detected in function GENERATE_BASE_CSV, please check outfiles in $OUTDIR/ and $WORKDIR/"; exit 1; }
+GENERATE_BASE_CSV || { echo "error detected calling function GENERATE_BASE_CSV, please check outfiles in $OUTDIR/ and $WORKDIR/"; exit 1; }
 
-printf "\noldest detected dataset in $GIRODIR/$WORKDIR/$CSV_COMPLETE\n"
+echo ""
+echo "info: oldest detected dataset in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
 head -1 "$GIRODIR/$WORKDIR/$CSV_COMPLETE"
 echo ""
 
+echo "info: latest detected dataset in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
+tail -1 "$GIRODIR/$WORKDIR/$CSV_COMPLETE"
+echo ""
+
+
 # what do you want to see ?
+
 if [[ "$TYPE" =~ ^moos ]]
 then
-   
    PREFIX="${PREFIX:=Moosach}"
+   #              title/name              regex                                   header
    DISPLAY_UMSATZ "${PREFIX}_Grundsteuer" "grundsteuer.*(oberwiesenfeld|moosach)" "Moosach/Oberwiesenfeld Grundsteuer"
    DISPLAY_UMSATZ "${PREFIX}_Hausgeld"    "hausgeld.*(oberwiesenfeld|moosach)"    "Moosach/Oberwiesenfeld Hausgeld"
    DISPLAY_UMSATZ "${PREFIX}_Miete"       "mietaussch.*(oberwiesenfeld|moosach)"  "Moosach/Oberwiesenfeld Miete"
