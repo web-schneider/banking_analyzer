@@ -19,9 +19,10 @@ source $CONFIG
 BASENAME=$(basename "$0")
 OUTDIR="outdir"
 WORKDIR="workdir"
-PDF_HEADER=""  # init (customized pdf internal page header)
-PREFIX=""      # init (customized output filename prefix)
+PDF_HEADER=""   # init (customized pdf internal page header)
+PREFIX=""       # init (customized output filename prefix)
 AWK="/usr/bin/awk"
+OUTFILES=false  # create outfiles or not
 #----------------------------------------------------------------------------------------------------
 
 
@@ -33,14 +34,14 @@ function Display_Usage () {
 
  displays several umsaetze for moosach, unterfoehring, rente (=pension), etc..
 
- because the algo/regex has to fight often with vage and unclear dexcriptions or strings,
+ because the algo/regex has to fight often with vage and unclear descriptions or strings,
  you urgently need validate every record for correctness. 
 
  tool $BASENAME resides best in \$HOME/bin/
  configured by $CONFIG
 
 
- first download csv file(s) from SSKM to supply required csv files:
+ first download csv file(s) manually from SSKM to supply required csv data:
    mandatory CSV format => CAMT-V2
    mandatory file name  => $GIRODIR/giro-99999999-yyyymmdd-YYYYMMDD.camtv2.csv
                                                   ^^^^^^^^ ^^^^^^^^
@@ -85,7 +86,7 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | $AWK '{printf("    %s\n", $0)}')
        eingang             ->  alle '+' Buchungen
        ausgang             ->  alle '-' Buchungen
        total               ->  alle Buchungen - nur sinnvoll mit p3 = positiv|negativ
-       large               ->  sorted by (positive) large euro numbers (>= +$LIMIT €)
+       large:[+-]<int>     ->  sorted by large euro number <int> (default >= +$LIMIT €)
        complete            ->  walk through most types in one command
        "search:what.*ever" ->  search for any string (case insensitiv, simple regex allowed)
 
@@ -96,6 +97,8 @@ $(eval ls -1 "$GIRODIR/$CSV_DEF" | $AWK '{printf("    %s\n", $0)}')
    -f "file_prefix"        ->  change leading part of file name from <type> to <file_prefix> [no special chars allowed]
 
    -s positiv|negativ|all  ->  (+- sign) accumulate EUR values either '+' or '-'
+
+   -o                      ->  set outfiles creation to true [default=$OUTFILES]
 
  examples:
    $BASENAME -y 2024 -t eingang                                                               # all postive income in 2024
@@ -116,7 +119,7 @@ _EOH
 #----------------------------------------------------------------------------------------------------
 # input
 
-while getopts hk:y:t:p:f:s: OPTIONS
+while getopts hk:y:t:p:f:s:o OPTIONS
 do
    case $OPTIONS in
         h) Display_Usage
@@ -141,7 +144,9 @@ do
            # convert schrott-chars from prefix
            [ -n "$PREFIX" ] && PREFIX=$(sed 's/[^0-9a-zA-Z_-]/_/g' <<<"$OPTARG")
            ;;
-          
+        o) OUTFILES=true
+           ;;
+
         ?) echo "error ?: unknown option, call '$0 -h' for details"
            exit 1 ;;
           
@@ -243,9 +248,10 @@ function MIME_CONVERT () {
  return $?
 }
 #----------------------------------------------------------------------------------------------------
+function GENERATE_BASE_CSV () {
+#
 # generate a cummulated csv of all giro-${KONTO}-????????-????????.camtv2.csv containing all data for the requested year ('-y YYYY')
 #
-function GENERATE_BASE_CSV () {
  local YEAR="$YEAR"   # global definiton
  local TYPE="$TYPE"   #       "
  local SIGN="$SIGN"   #       "
@@ -318,9 +324,10 @@ END { if (E_E) { exit 1 }
  return $?
 }
 #----------------------------------------------------------------------------------------------------
+function DISPLAY_CSV () {
+#
 # display CSV by search string
 #
-function DISPLAY_CSV () {
  local PATTERN="$1"
 
  [[ "$PATTERN" == "Umsatz_Eingang" ]] && PATTERN=".*"
@@ -352,16 +359,17 @@ END {
             printf("%s%s%s%s%s%s%s%s%s\n", FLD[1], FS, FLD[2], FS, FLD[3], FS, FLD[4], FS, FLD[6])
           }
 
-      printf("%s%s%d%s%s%s%s%10.2f\n", "records", FS, CNT, FS, FS, "total (EUR)", FS, SUM)
+      printf("%s%s%d%s%s%s%s%10.2f\n\n", "records:", FS, CNT, FS, FS, "total (EUR)", FS, SUM)
       if (CNT == 0) { exit 1 }
     }
 ' < "$WORKDIR/$CSV_COMPLETE"
  return $?
 }
 #----------------------------------------------------------------------------------------------------
+function DISPLAY_TABLE () {
+#
 # display table by search string
 #
-function DISPLAY_TABLE () {
  local PATTERN="$1"
 
  [[ "$PATTERN" == "Umsatz_Eingang" ]] && PATTERN=".*"
@@ -373,7 +381,7 @@ BEGIN { FS  = ";"
         PAT = tolower(SEARCH)
         CNT = 0
         #%% not in MAWK ! IGNORECASE = 1
-        printf("%-8s | %-25s | %-90s | %-65s | %10s\n\n", "Datum", "Buchungstext", "Verwendungszweck", "Korrespondent", "Betrag")
+        printf("%-8s | %-25s | %-90s | %-65s | %10s\n", "Datum", "Buchungstext", "Verwendungszweck", "Korrespondent", "Betrag")
       }
 
 {
@@ -392,7 +400,7 @@ END {
             split(LIST[IDX], FLD, FS)
             printf("%8s | %-25s | %-90s | %-65s | %10.2f\n", FLD[1], substr(FLD[2],0,25), substr(FLD[3],0,90), substr(FLD[4],0,65), FLD[6])
           }
-      printf("\n%-9s %-4d %182s %12.2f\n", "records:", CNT, "total (EUR):", SUM)
+      printf("%-9s %-4d %184s %10.2f\n\n", "records:", CNT, "total (EUR):", SUM)
       if (CNT == 0) { exit 1 }
     }
 ' < "$WORKDIR/$CSV_COMPLETE"
@@ -410,23 +418,32 @@ function DISPLAY_UMSATZ () {
  TITLE="${TITLE:=$PREFIX}" # if PREFIX != "" then change
  TITLE="${TITLE}-${YEAR}_${SIGN}"
  HEADER=${HEADER:=$TITLE}
- [[ "$PDF_HEADER" != "" ]] && HEADER="$PDF_HEADER"   # global PDF_HEADER by '-p' overwrites HEADER
+ [[ "$PDF_HEADER" != "" ]] && HEADER="$PDF_HEADER"     # global PDF_HEADER by '-p' overwrites HEADER
 
- eval rm -f "$GIRODIR/$OUTDIR/$TITLE.*"   # pre cleanup
+ $OUTFILES && eval rm -f "$GIRODIR/$OUTDIR/$TITLE.*"   # pre cleanup
 
- printf ""             > "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"
- DISPLAY_CSV "$REGEX" >> "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" && { mv "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" "$GIRODIR/$OUTDIR/$TITLE.csv"; } \
-                                                           || { echo "info: no '$SIGN' records found in function $FUNCNAME for title '$TITLE' (probably no csv data available?)"; rm -f "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"; } 
+ # send only to csvfile, not to stdout
+ $OUTFILES && {
+    printf ""             > "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"
+    DISPLAY_CSV "$REGEX" >> "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" && { mv "$GIRODIR/$OUTDIR/$TITLE.csv.tmp" "$GIRODIR/$OUTDIR/$TITLE.csv"; } \
+                                                              || { echo "info: no '$SIGN' records found in function $FUNCNAME for title '$TITLE' (probably no csv records existing?)"; rm -f "$GIRODIR/$OUTDIR/$TITLE.csv.tmp"; } 
+ }
 
- printf "$TITLE.table\n\n" > "$GIRODIR/$OUTDIR/$TITLE.table.tmp"
- DISPLAY_TABLE "$REGEX"   >> "$GIRODIR/$OUTDIR/$TITLE.table.tmp" && { mv "$GIRODIR/$OUTDIR/$TITLE.table.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n\n"; cat "$GIRODIR/$OUTDIR/$TITLE.table"; } \
-                                                                 || { rm -f "$GIRODIR/$OUTDIR/$TITLE.table.tmp"; }
+ # send to stdout and on request also to table file
+ if $OUTFILES 
+ then
+    printf "$TITLE.table\n\n" > "$GIRODIR/$OUTDIR/$TITLE.table.tmp"
+    DISPLAY_TABLE "$REGEX"   >> "$GIRODIR/$OUTDIR/$TITLE.table.tmp" && { mv    "$GIRODIR/$OUTDIR/$TITLE.table.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n\n"; cat "$GIRODIR/$OUTDIR/$TITLE.table"; }
+    [ -e "$GIRODIR/$OUTDIR/$TITLE.table" ] && TABLE_TO_PDF "$GIRODIR/$OUTDIR/$TITLE.table" "$HEADER"
+ else 
+    printf "$TITLE\n"
+    DISPLAY_TABLE "$REGEX"    # finally only to stdout
+ fi
 
- [ -e "$GIRODIR/$OUTDIR/$TITLE.table" ] && TABLE_TO_PDF "$GIRODIR/$OUTDIR/$TITLE.table" "$HEADER"
  return $?
 }
 #----------------------------------------------------------------------------------------------------
-function SORT_BY_EURO () {
+function SORT_BY_LIMIT () {
  local TITLE="$1"          # also part of output file name
  local LIMIT=$2            # minimal displayed values
  local HEADER="$3"         # optional
@@ -441,15 +458,29 @@ function SORT_BY_EURO () {
 
  eval rm -f "$GIRODIR/$OUTDIR/$TITLE.*"   # pre cleanup
 
+ function _AWK_ () {
+    if [ $LIMIT -gt 0 ] 
+    then $AWK -F ";" -v LIM="$LIMIT" 'BEGIN {RC=0} (int($6) >= int(LIM)) {RC+=1; gsub(/[^\x20-\x7e]/, "_", $0); printf "%-9s | %-25s | %-90s | %-65s | %10.2f\n", $1, substr($2,0,25), substr($3,0,90), substr($4,0,65), $6} END {printf("records: %d\n", RC)}' 
+    else $AWK -F ";" -v LIM="$LIMIT" 'BEGIN {RC=0} (int($6) <= int(LIM)) {RC+=1; gsub(/[^\x20-\x7e]/, "_", $0); printf "%-9s | %-25s | %-90s | %-65s | %10.2f\n", $1, substr($2,0,25), substr($3,0,90), substr($4,0,65), $6} END {printf("records: %d\n", RC)}'
+    fi
+ }
+
  # sorted by EUR val field #6
- tr -d '"' < "$GIRODIR/$WORKDIR/$CSV_COMPLETE" \
-           | sort -t ";" -k 6 -n \
-           | $AWK -F ";" -v LIM="$LIMIT" '(int($6) >= int(LIM)) {gsub(/[^\x20-\x7e]/, "_", $0); printf "%-9s | %-25s | %-90s | %-65s | %10.2f\n", $1, substr($2,0,25), substr($3,0,90), substr($4,0,65), $6}' \
-           | tee "$GIRODIR/$OUTDIR/$TITLE.tmp" \
-                 && { mv "$GIRODIR/$OUTDIR/$TITLE.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n(no totals for this option)\n" >> "$GIRODIR/$OUTDIR/$TITLE.table"; cat "$GIRODIR/$OUTDIR/$TITLE.table"; } \
+ if $OUTFILES
+ then
+    tr -d '"' < "$GIRODIR/$WORKDIR/$CSV_COMPLETE" \
+           | sort -t ";" -k 6 -n                  \
+           | _AWK_                                 \
+           | tee "$GIRODIR/$OUTDIR/$TITLE.tmp"      \
+                 && { mv "$GIRODIR/$OUTDIR/$TITLE.tmp" "$GIRODIR/$OUTDIR/$TITLE.table"; printf "\n(no totals for this option)\n" >> "$GIRODIR/$OUTDIR/$TITLE.table"; } \
                  || { echo "info: no records found in function $FUNCNAME, type '$TYPE'"; rm -f "$GIRODIR/$OUTDIR/$TITLE.tmp"; } 
 
- [ -e "$GIRODIR/$OUTDIR/$TITLE.table" ] && TABLE_TO_PDF "$GIRODIR/$OUTDIR/$TITLE.table" "$HEADER"
+    [ -e "$GIRODIR/$OUTDIR/$TITLE.table" ] && TABLE_TO_PDF "$GIRODIR/$OUTDIR/$TITLE.table" "$HEADER"
+ else
+    tr -d '"' < "$GIRODIR/$WORKDIR/$CSV_COMPLETE" | sort -t ";" -k 6 -n | _AWK_
+ fi
+
+ unset -f _AWK_
 
  return $?
 }
@@ -463,7 +494,8 @@ function DISPLAY_FILES () {
 
  printf "\ncreated files:\n"
  find "$GIRODIR/$OUTDIR/" -iname "$FILE.*" -ls | grep . || echo "info: no files created in function $FUNCNAME -> $GIRODIR/$OUTDIR/$FILE.*"
- return $?
+
+return $?
 }
 #----------------------------------------------------------------------------------------------------
 function TABLE_TO_PDF () {
@@ -513,11 +545,11 @@ MIME_CONVERT || { echo "error detected calling function MIME_CONVERT, please che
 GENERATE_BASE_CSV || { echo "error detected calling function GENERATE_BASE_CSV, please check outfiles in $OUTDIR/ and $WORKDIR/"; exit 1; }
 
 echo ""
-echo "info: oldest detected dataset in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
+echo "info: oldest detected record in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
 head -1 "$GIRODIR/$WORKDIR/$CSV_COMPLETE"
 echo ""
 
-echo "info: latest detected dataset in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
+echo "info: newest detected record in $GIRODIR/$WORKDIR/$CSV_COMPLETE"
 tail -1 "$GIRODIR/$WORKDIR/$CSV_COMPLETE"
 echo ""
 
@@ -532,7 +564,7 @@ then
    DISPLAY_UMSATZ "${PREFIX}_Hausgeld"    "hausgeld.*(oberwiesenfeld|moosach)"    "Moosach/Oberwiesenfeld Hausgeld"
    DISPLAY_UMSATZ "${PREFIX}_Miete"       "mietaussch.*(oberwiesenfeld|moosach)"  "Moosach/Oberwiesenfeld Miete"
    DISPLAY_UMSATZ "${PREFIX}_Sonstiges"   "Grundbuch.*Moosach|Sondereigentum.*145.*346.*136|moosach.*rate|MyApart.*(Moosach|Oberwiesenfeld)"  "Moosach/Oberwiesenfeld Sonstiges"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^unterf ]]
 then
@@ -541,7 +573,7 @@ then
    DISPLAY_UMSATZ "${PREFIX}_Hausgeld"    "hausgeld.*unterfoehring"    "Unterfoehring Hausgeld"
    DISPLAY_UMSATZ "${PREFIX}_Miete"       "mietaussch.*unterfoehring|pauschalierter Schadenersatz|Einheit A 5.24" "Unterfoehring Miete"
    DISPLAY_UMSATZ "${PREFIX}_Sonstiges"   "(UFH|Unterfoehring.*)Kaufpreisrate| 625222533706|Auflassung .*UFH|Terratax|Sondereigentum .*265.*736|MyApart Unterfoehring" "Unterfoehring Sonstiges"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^immo ]]
 then
@@ -550,111 +582,116 @@ then
    DISPLAY_UMSATZ "${PREFIX}_Hausgeld"       "hausgeld.*(oberwiesenfeld|moosach|unterfoehring)"    "Immobilien Hausgeld"
    DISPLAY_UMSATZ "${PREFIX}_Miete"          "mietaussch.*(oberwiesenfeld|moosach|unterfoehring)|pauschalierter Schadenersatz|Einheit A 5.24" "Immobilien Mieteingang"
    DISPLAY_UMSATZ "${PREFIX}_Kaufpreisraten" "Kaufpreisraten|tilgung|abschlagszahlung|Moosach.*Rate|Unterfoehring.*Rate"  "Immobilien Kaufpreisraten"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^miete ]]
 then
    PREFIX="${PREFIX:=Mieteingang}"
    DISPLAY_UMSATZ "${PREFIX}"  "mietaussch.*(oberwiesenfeld|moosach|unterfoehring)|pauschalierter Schadenersatz|Einheit A 5.24" "Immobilien Mieteingang"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^kaufpreis ]]
 then
    PREFIX="${PREFIX:=Kaufpreisraten}"
    DISPLAY_UMSATZ "${PREFIX}"  "Kaufpreisraten|tilgung|abschlagszahlung|Moosach.*Rate|Unterfoehring.*Rate"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^versich ]]
 then
    PREFIX="${PREFIX:=Versicherungen}"
    DISPLAY_UMSATZ "${PREFIX}"  "versicherung|generali|PRIVATSCHUTZ|Rechtsschutz|Landeskrankenhilfe|LKH"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "lohn" || "$TYPE" =~ ^gehalt ]]
 then
    PREFIX="${PREFIX:=Gehalt}"
    DISPLAY_UMSATZ "${PREFIX}"  "lohn.*gehalt"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^rente ]]
 then
    PREFIX="${PREFIX:=Rente}"
    DISPLAY_UMSATZ "${PREFIX}"  "97054030157S02311.*RV-RENTE.*Renten Service"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^pension ]]
 then
    PREFIX="${PREFIX:=Pension}"
    DISPLAY_UMSATZ "${PREFIX}"  "Rente.*Pens.*05115455.*Siemens"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
-elif [[ "$TYPE" =~ ^einku ]]  # einkuenfte aus nicht-selbststaendiger Arbeit und nicht vermietung
+elif [[ "$TYPE" =~ ^einku ]]
 then
    PREFIX="${PREFIX:=Einkuenfte}"
    DISPLAY_UMSATZ "${PREFIX}"  "lohn.*gehalt|97054030157S02311.*RV-RENTE.*Renten Service|Rente.*Pens.*05115455.*Siemens"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^steuer ]]
 then
    PREFIX="${PREFIX:=Steuer}"
    DISPLAY_UMSATZ "${PREFIX}"  "117/269/90567|grundsteuer|steuer|finanzamt|finanzkasse|ekst|117/269/90567|1792699056719"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "depot" || "$TYPE" =~ ^wertpap ]]
 then
    PREFIX="${PREFIX:=Depot}"
    DISPLAY_UMSATZ "${PREFIX}"  "WERTPAPIER|Depot |auxmoney|Anlegerauszahlung|Depotgebuehren|Wertp.Abrechn."
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "erbe" || "$TYPE" =~ ^schenkung ]]
 then
    PREFIX="${PREFIX:=Erbe}"
    DISPLAY_UMSATZ "${PREFIX}"  " erbe |erbschaft|schenkung"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" =~ ^arzt || "$TYPE" =~ ^medizin ]]
 then
    PREFIX="${PREFIX:=Medizin}"
    DISPLAY_UMSATZ "${PREFIX}"  "dr. |labor|medizin|apotheke|untersuchung|arzt"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "eingang" ]]
 then
    PREFIX="${PREFIX:=Umsatz_Eingang}"
    DISPLAY_UMSATZ "${PREFIX}" "Umsatz_Eingang"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "ausgang" ]]
 then
    PREFIX="${PREFIX:=Umsatz_Ausgang}"
    DISPLAY_UMSATZ "${PREFIX}" "Umsatz_Ausgang"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "total" ]]
 then
    PREFIX="${PREFIX:=Total}"
    DISPLAY_UMSATZ "${PREFIX}" ".*"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "${TYPE%%:*}" == "search" ]]
 then
    PREFIX="${PREFIX:=Search}"
    REGEX="${TYPE#*:}"
    DISPLAY_UMSATZ "${PREFIX}"  "$REGEX"
-   DISPLAY_FILES  "${PREFIX}"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
-elif [[ "$TYPE" == "large" ]]
+elif [[ "$TYPE" =~ ^large: ]]
 then
+   LIM=${TYPE##*:}
+   [ -z "$LIM" ] && LIM="+${LIMIT}"
+   LIMIT="$LIM"
+   [ $LIMIT -eq 0 ] && { printf "error: LIMIT==0 is nonsense\n"; exit 1; }
    PREFIX="${PREFIX:=Large}"
-   SORT_BY_EURO   "${PREFIX}" "$LIMIT"
-   DISPLAY_FILES  "${PREFIX}"
+   SORT_BY_LIMIT   "${PREFIX}" "$LIMIT"
+   $OUTFILES && DISPLAY_FILES "${PREFIX}"
 
 elif [[ "$TYPE" == "complete" ]]
 then
+   $OUTFILES && OF='-o' || OF=''
    for TYPE in moosach unterfoehring kaufpreisrate rente pension gehalt versicherung steuer medizin depot eingang ausgang
    do
      printf "\n********** calculating $TYPE **********\n"
-     $0 -y "$YEAR" -t "$TYPE"
+     $0 $OF -y "$YEAR" -t "$TYPE"
    done
 
 else
